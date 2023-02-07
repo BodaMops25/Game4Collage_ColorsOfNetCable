@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="ua">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Гра: обжим мережевого кабелю</title>
+  <link rel="stylesheet" href="main.css">
+  <style>
+
+    table {
+      margin: 10px;
+      width: 500px;
+    }
+
+    table td:nth-child(1),
+    table td:nth-child(2) {padding-left: 5px}
+
+    table td:nth-child(1) {width: 7%}
+    table td:nth-child(2) {width: 40%}
+
+    table canvas {
+      width: 100%;
+      height: 100%;
+    }
+
+    #timer {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 80px;
+    }
+
+    #timer p.timer-text {
+      margin-bottom: 5px;
+    }
+
+    .bottom-buttons {
+      position: absolute;
+      bottom: 15px;
+      left: 15px;
+    }
+
+    .bottom-buttons > button:first-child {margin-right: 10px}
+
+    .popup-wrapper.hidden {display: none}
+    .popup-wrapper {
+      width: 100vw;
+      height: 100vh;
+      background-color: #0008;
+      position: fixed;
+      top: 0;
+      left: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .popup-wrapper p {margin: 0}
+
+    .popup-wrapper .popup-inner {
+      position: relative;
+      width: 50%;
+      height: 50%;
+      background-color: #fff;
+      border-radius: 6px;
+      border: 1px solid;
+      padding: 10px;
+    }
+
+    .popup-wrapper .popup-inner .popup-close {
+      width: 20px;
+      height: 20px;
+      background-color: #fff;
+      border-radius: 1000vw;
+      border: 1px solid;
+      display: flex;  
+      justify-content: center;  
+      align-items: center;  
+      position: absolute;
+      top: -10px;
+      right: -10px;
+      cursor: pointer;
+    }
+
+    .popup-wrapper .popup-inner .title {margin-bottom:  10px}
+  </style>
+</head>
+<body style="display: none">
+
+  <table id="game-table" border="1px">
+    <tr>
+      <th colspan="3">Комп'ютер -> Мережа (обидві сторони однакові)</th>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td></td>
+      <td rowspan="8">
+        <canvas id="game-field"></canvas>
+      </td>
+    </tr>
+  </table>
+
+  <div id="timer">
+    <p class="timer-text">00:00</p>
+    <button class="turn-off">turn off</button>
+  </div>
+
+  <div class="bottom-buttons">
+    <button id="logout">Вихід з аккаунту</button>
+    <button id="show-info">Вивід даних на екран</button>
+  </div>
+
+  <div class="popup-wrapper hidden">
+    <div class="popup-inner">
+      <div class="popup-close" onclick="document.querySelector('.popup-wrapper').classList.add('hidden')">X</div>
+      <p class="title">Дані:</p>
+      <p class="field account-name">Ім'я аккаунту: <span class="field-value"></span></p>
+      <p class="field time">Час: <span class="field-value"></span></p>
+      <p class="field is-correct">Завдання вирішено: <span class="field-value"></span></p>
+    </div>
+  </div>
+
+  <script>
+
+    // ACCOUNT
+
+    let account = localStorage.getItem('current-account')
+
+    if(!account) location.href = 'reg_login.html'
+    else {
+      document.body.style = ''
+      account = JSON.parse(account || '{}')
+    }
+
+    // CORE FUNCTIONS
+
+    function randInt(max, min = 0) {
+      return Math.floor(Math.random() * (max - min) + min)
+    }
+
+    function addZero(num) {
+      return num < 10 ? '0' + num : num
+    }
+
+    function timeToString(date) {
+      if(+date < 0) return '00:00'
+
+      const minutes = date.getMinutes(),
+            seconds = date.getSeconds()
+
+      return addZero(minutes) + ':' + addZero(seconds)
+    }
+
+    // COLORS
+
+    const CableColors = {
+      white: {word: 'білий', color: 'white'},
+      orange: {word: 'помаранчевий', color: 'orange'},
+      blue: {word: 'синій', color: 'blue'},
+      brown: {word: 'коричневий', color: 'brown'},
+      green: {word: 'зелений', color: 'green'},
+    }
+
+    const CableScheme = [
+      CableColors.white,
+      CableColors.orange,
+      CableColors.green,
+      CableColors.blue,
+      CableColors.brown,
+      [CableColors.white, CableColors.orange],
+      [CableColors.white, CableColors.green],
+      [CableColors.white, CableColors.blue],
+      [CableColors.white, CableColors.brown],
+    ]
+
+    function CableColorToHTML(item) {
+      if(Array.isArray(item)) {
+        return `<span style="color: ${item[0].color !== 'white' ? item[0].color : ''}">${item[0].word}</span>` + '-' + `<span style="color: ${item[1].color !== 'white' ? item[1].color : ''}">${item[1].word}</span>`
+      }
+      else return `<span style="color: ${item.color !== 'white' ? item.color : ''}">${item.word}</span>`
+    }
+
+    function generateCableColorSecuence(cableCount, cableScheme) {
+      const arr = []
+      for(let i = 0; i < cableCount; i++) {
+        arr.push(randInt(CableScheme.length))
+      }
+      return arr
+    }
+
+    // GAME
+
+    function Game(tableNode, canvasNode, cableCount, cableScheme, timerObj = {}) {
+      this.tableNode = tableNode
+      this.canvasNode = canvasNode
+      this.cableCount = cableCount
+      this.cableScheme = cableScheme
+      this.trueCableColorSequence = generateCableColorSecuence(cableCount, cableScheme)
+      this.currentCableColorSequence = this.trueCableColorSequence.map(itm => itm).sort(() => randInt(2) ? 1 : -1)
+      this.cableHitboxes = {
+        topY: null,
+        bottomY: null,
+        axisX: []
+      }
+      this.ctx = this.canvasNode.getContext('2d')
+      
+      {
+        const rndNum = randInt(90, 65)
+        this.baseId = rndNum.toString() + this.cableCount + String.fromCharCode(rndNum)
+      }
+      this.cableColorParticles = {}
+
+      this.timer = {
+        timerNode: timerObj.timerNode,
+        timerOffNode: timerObj.timerOffNode,
+        timerTimeMS: timerObj.timerTimeMS,
+        timerEndDate: null,
+        timer: null,
+        timerFunc: null,
+        timeDateLeft: null,
+        isStopped: false,
+
+        run: function() {
+          if(!this.isStopped) {
+            if(this.timerEndDate === null) this.timerEndDate = new Date(+new Date() + this.timerTimeMS)
+            this.timer = setInterval(this.timerFunc, 100)
+          }
+          else this.timerFunc()
+        },
+        stop: function() {
+          clearInterval(this.timer)
+          this.isStopped = true
+        }
+      }
+
+      this.timer.timerFunc = () => {
+        this.timer.timeDateLeft = new Date(+this.timer.timerEndDate - new Date())
+
+        if(this.timer.timerNode) this.timer.timerNode.innerText = timeToString(this.timer.timeDateLeft)
+
+        if(+this.timer.timeDateLeft <= 0) {
+          this.timer.stop()
+
+          this.tableNode.style.pointerEvents = 'none'
+
+          let answerString = 'Час вийшов!\n'
+
+          if(this.isCableSeqCorrect()) answerString += 'Задання вирішено правильно'
+          else answerString += 'Завдання не вирішено'
+
+          alert(answerString)
+        }
+      }
+      
+      this.timer.timerOffNode?.addEventListener('click', () => {
+        this.timer.stop()
+        this.timer.timerOffNode.remove()
+      }, {once: 1})
+
+      // FUNCTIONS
+
+      this.cableNumFromCoords = (x, y, exceptionsArr = []) => {
+        if(this.cableHitboxes.bottomY <= y && y <= this.cableHitboxes.topY) {
+          const indexes = this.cableHitboxes.axisX.reduce((arr, itm, i) => {
+            if(itm.leftX <= x && x <= itm.rightX) arr.push(i)
+            return arr
+          }, [])
+
+          const findedIndex = indexes.find(itm => itm !== -1 && exceptionsArr.includes(itm) === false)
+          return findedIndex !== undefined ? findedIndex : -1
+        }
+        else return -1
+      }
+
+      this.isCableSeqCorrect = () => {
+        let result = true
+        for(let i = 0; i < this.cableCount; i++) {
+          if(this.currentCableColorSequence[i] !== this.trueCableColorSequence[i]) result = false
+        }
+        return result
+      }
+
+      // EXPORT & IMPORT
+
+      this.export = () => {
+        return JSON.stringify(this)
+      }
+
+      this.import = importJSONObject => {
+        const importObject = JSON.parse(importJSONObject)
+        for(const key in importObject) {
+
+          if(importObject[key].toString() !== '[object Object]') this[key] = importObject[key]
+          else if(key === 'timer') {
+            const timer = this.timer,
+                  importTimer = importObject.timer
+
+            for(const subkey in importTimer) {
+              if(timer[subkey]?.getDate) timer[subkey] = new Date(importTimer[subkey])
+              else if(importTimer[subkey]?.toString() !== '[object Object]') timer[subkey] = importTimer[subkey]
+            }
+
+            timer.timerEndDate = new Date(+new Date() + +new Date(importTimer.timeDateLeft))
+            this.setTrueColorSequence()
+          }
+        }
+
+        this.ctx.clearRect(0, 0, cnvsWidth, cnvsHeight)
+        this.drawCables()
+        this.drawBase()
+      }
+
+      // // MAKE CABLE RULES
+
+      this.setTrueColorSequence = () => {
+        const vipRow1 = this.tableNode.querySelector('tr:nth-child(1)'),
+              vipRow2 = this.tableNode.querySelector('tr:nth-child(2)')
+
+        vipRow1.remove()
+        vipRow2.remove()
+
+        this.tableNode.innerHTML = ''
+
+        this.tableNode.insertAdjacentElement('beforeend', vipRow1)
+        this.tableNode.insertAdjacentElement('beforeend', vipRow2)
+
+        this.trueCableColorSequence.forEach((itm, i) => {
+          if(i === 0) {
+            this.tableNode.querySelector('tr:nth-child(' + i+2 + ') td:nth-child(2)').innerHTML = CableColorToHTML(CableScheme[itm])
+          }
+          else {
+            this.tableNode.insertAdjacentHTML('beforeEnd', `
+              <tr>
+                <td>${i+1}</td>
+                <td>${CableColorToHTML(CableScheme[itm])}</td>
+              </tr>
+            `)
+          }
+        })
+      }
+
+      this.setTrueColorSequence()
+
+      // CANVAS
+
+      const resNum = 3
+
+      this.canvasNode.width = this.tableNode.querySelector('tr:nth-child(2) td:last-child').clientWidth * resNum
+      this.canvasNode.height = this.tableNode.querySelector('tr:nth-child(2) td:last-child').clientHeight * resNum
+
+      this.canvasNode.style.width = this.canvasNode.width / resNum + 'px'
+      this.canvasNode.style.height = this.canvasNode.height / resNum + 'px'
+
+      const cnvsWidth = this.canvasNode.width,
+            cnvsHeight = this.canvasNode.height
+
+      this.drawWire = (x, y, width, height, color, strokeSize) => {
+        const colorObj = CableScheme[color] || {color: color}
+
+        this.ctx.beginPath()
+        this.ctx.moveTo(x, y)
+        this.ctx.lineTo(x, y - height)
+        this.ctx.lineTo(x + width, y - height)
+        this.ctx.lineTo(x + width, y)
+
+        this.ctx.fillStyle = colorObj.color || colorObj[0].color
+        this.ctx.fill()
+        this.ctx.lineWidth = strokeSize
+        this.ctx.stroke()
+
+        if(Array.isArray(colorObj)) {
+          this.ctx.fillStyle = colorObj[1].color
+
+          if(this.cableColorParticles[color] === undefined) {
+            this.cableColorParticles[color] = []
+
+            const num = randInt(1, 4)
+            for(let i = 0; i < num; i++) this.cableColorParticles[color].push(randInt(101) / 100)
+          }
+          this.cableColorParticles[color].forEach(posY => {
+            // this.ctx.fillRect(x+2, randInt(y, cableBaseHeihgt*1.5 - cableWidth), cableWidth-4, -cableWidth+2)
+            this.ctx.fillRect(x+2, y - (cableBaseHeihgt*1.5 - cableWidth) * posY, cableWidth-4, -cableWidth+2)
+          })
+        }
+      }
+
+      const cableBaseWidth = cnvsWidth * .8,
+            cableBaseHeihgt = cableBaseWidth / 4,
+            cableBaseX = (cnvsWidth - cableBaseWidth) / 2,
+            cableBaseY = (cnvsHeight - cableBaseHeihgt) * 1.2,
+            allCableWidth = cableBaseWidth * .8,
+            cableStep = allCableWidth / this.cableCount,
+            cableWidth = cableStep * .7
+
+      // draw cable wires
+
+      this.drawCables = () => {
+        this.currentCableColorSequence.forEach((itm, i) => {
+
+          const x = cableBaseX + (cableBaseWidth - allCableWidth) / 2 + cableStep * i,
+                y = cableBaseY - cableBaseHeihgt
+
+
+          this.drawWire(x, y, cableWidth, cableBaseHeihgt*1.5, itm, cableWidth*.1)
+
+          if(this.cableHitboxes.topY === null) {
+            this.cableHitboxes.topY = y / resNum
+            this.cableHitboxes.bottomY = (y - cableBaseHeihgt*1.5) / resNum
+          }
+
+          this.cableHitboxes.axisX[i] = {
+            leftX: x / resNum,
+            rightX: (x + cableWidth) / resNum
+          }
+        })
+      }
+
+      // draw cables base
+
+      this.drawBase = () => {
+        this.drawWire(cableBaseX, cableBaseY, cableBaseWidth, cableBaseHeihgt, '#ccc', cableBaseWidth*.012)
+
+        this.ctx.fillStyle = '#000'
+        this.ctx.font = cableBaseWidth*.09 + 'px sans-serif'
+        this.ctx.fillText(this.baseId, cableBaseX + cableBaseWidth / 2 - cableBaseWidth*.1, cableBaseY - cableBaseHeihgt / 2 + cableBaseWidth*.05)
+
+        // draw cable numbers
+
+        this.ctx.font = cableWidth + 'px sans-serif'
+        this.ctx.fillText(1, cableBaseX * 1.08 + (cableBaseWidth - allCableWidth) / 2, cableBaseY - cableBaseHeihgt*.7)
+        this.ctx.fillText(this.cableCount, (cableBaseX * this.cableCount*0.1375 + cableBaseWidth) - (cableBaseWidth - allCableWidth), cableBaseY - cableBaseHeihgt*.7)
+      }
+
+      this.drawCables()
+      this.drawBase()
+
+      this.changeCablePlace = (cableIndex, nextCableIndex) => {
+        const tmp = this.currentCableColorSequence[nextCableIndex]
+        this.currentCableColorSequence[nextCableIndex] = this.currentCableColorSequence[cableIndex]
+        this.currentCableColorSequence[cableIndex] = tmp
+
+        this.ctx.clearRect(0, 0, cnvsWidth, cnvsHeight)
+        this.drawCables()
+        this.drawBase()
+
+        return nextCableIndex
+      }
+
+      // CANVAS EVENTS
+
+      let movingCableIndex = null
+
+      mouseMove = event => {
+        const eventX = event.offsetX,
+              eventY = event.offsetY,
+              nextCable = this.cableNumFromCoords(eventX, eventY)
+
+        if(nextCable !== -1) movingCableIndex = this.changeCablePlace(movingCableIndex, nextCable)
+      }
+
+      this.canvasNode.addEventListener('mousedown', event => {
+        const eventX = event.offsetX,
+              eventY = event.offsetY
+
+        movingCableIndex = this.cableNumFromCoords(eventX, eventY)
+
+        if(movingCableIndex !== -1) {
+          this.canvasNode.addEventListener('mouseup', () => {
+            if(this.isCableSeqCorrect()) {
+              this.timer.stop() 
+              alert('Вирішено правильно')
+            }
+            this.canvasNode.removeEventListener('mousemove', mouseMove)
+          }, {once: 1})
+
+          this.canvasNode.addEventListener('mousemove', mouseMove)
+        }
+      })
+    }
+
+    const game = new Game(
+      document.querySelector('table#game-table tbody'),
+      document.querySelector('#game-field'),
+      8,
+      CableScheme,
+      {
+        timerNode: document.querySelector('#timer .timer-text'),
+        timerOffNode: document.querySelector('#timer .turn-off'),
+        timerTimeMS: 1e3 * 60 * 3
+        // timerTimeMS: 1e3 * 3
+      }
+    )
+    if(account.data.gameData) game.import(account.data.gameData)
+    game.timer.run()
+    if(game.timer.isStopped) game.timer.timerOffNode.remove()
+
+    // LOGOUT
+
+    document.querySelector('#logout').addEventListener('click', () => {
+      localStorage.setItem('current-account', '')
+      location.href = 'reg_login.html'
+    })
+
+    // OUTPUT INFO
+
+    const outButtonNode = document.querySelector('#show-info'),
+          popup = document.querySelector('.popup-wrapper'),
+          dataNodes = {
+            accountNameNode: popup.querySelector('.field.account-name'),
+            timeNode: popup.querySelector('.field.time'),
+            isCorrectNode: popup.querySelector('.field.is-correct')
+          }
+
+    function setOutData() {
+      dataNodes.accountNameNode.querySelector('.field-value').innerText = account.name
+      dataNodes.timeNode.querySelector('.field-value').innerText = timeToString(new Date(game.timer.timerTimeMS - game.timer.timeDateLeft))
+      dataNodes.isCorrectNode.querySelector('.field-value').innerText = game.isCableSeqCorrect() ? 'Так' : 'Ні'
+    }
+
+    outButtonNode.addEventListener('click', () => {
+      setOutData()
+      popup.classList.remove('hidden')
+    })
+
+    setInterval(() => {
+      account.data.gameData = game.export()
+
+      const accounts = JSON.parse(localStorage.getItem('accounts'))
+      accounts[account.name].gameData = game.export()
+
+      localStorage.setItem('current-account', JSON.stringify(account))
+      localStorage.setItem('accounts', JSON.stringify(accounts))
+    }, 1000)
+
+  </script>
+</body>
+</html>
